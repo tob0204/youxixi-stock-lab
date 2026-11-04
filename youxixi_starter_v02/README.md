@@ -1,51 +1,67 @@
-# 油洗洗｜台股量化訊號回測系統 v0.4（GitHub + Streamlit Cloud）
+# 油洗洗 v0.6 — 台股十種技術指標回測與最新訊號
 
-此版本供 **GitHub Repository → Streamlit Community Cloud → Chrome 瀏覽器** 使用。沒有 Windows 安裝檔，暫時不含選擇權試算。
+這是 **GitHub + Streamlit Community Cloud** 的純網頁版專案。**不需在 Windows 本機安裝 Python、Streamlit、VS Code，也不需執行 `.bat`。** 目前是可執行的日線研究原型，而非真正盤中當沖交易系統。
 
-## 直接部署到「你原本的 GitHub Repository」
+## 使用前先看
 
-1. 在電腦解壓本 ZIP；**不要上傳 ZIP 本身，也不要再包一層資料夾**。
-2. 打開你已建立的 GitHub Repository，進入最上層（根目錄），點 **Add file → Upload files**，選擇以下檔案：
-   - `app.py`
-   - `stock_names.py`
-   - `requirements.txt`
-   - `README.md`
-   - `test_stock_names.py`（可省略，建議保留）
-3. GitHub 若提示檔名相同，以本版檔案**更新／覆蓋**原本的 `app.py`、`requirements.txt`；完成後按 **Commit changes**。不要留下另一個 `app_v04.py` 當主檔，或將檔案放在 ZIP 同名子資料夾內。
-4. 打開原本 Streamlit Community Cloud 網站。若已部署同一個 Repository，GitHub commit 後 Streamlit 一般會自動更新，不需重建網站；如沒更新，可在 **Manage app** 檢查、重新啟動與錯誤日誌。
-5. 若是第一次部署，在 https://share.streamlit.io/ → Create app → 填入 GitHub Repository 所有者／名稱；`Branch` 選 Repository 實際使用的分支（通常 `main`）；`Main file path` 填 **`app.py`** → Deploy。主檔不是 `streamlit_app.py`。
+- **資料**：Yahoo Finance 非官方公開日 K（自動調整 OHLC）；股票中文名稱優先向證交所及櫃買中心取得，可能因 API 異常而回退到有限名單。
+- **即時性**：沒有盤中即時股價或當沖成交資料；「最新交易訊號」是截至最新**已完成日 K**的收盤後訊號，下一交易日開盤作為研究假設。日期會標示在畫面上。
+- **訊號**：指標當天出現交叉／突破才算「新事件」。買入/賣出為研究標籤，不等於實際下單指令，尤其看跌方向沒有完整模擬放空限制。
+- **勝算**：這裡呈現的是樣本內已完成事件的歷史成本後命中率，不是經過獨立外樣本驗證的「今天準確預測機率」。
+- **選擇權**：尚未納入。
 
-## 這個版本會做什麼？
+## 透過 GitHub 網頁更新你原本的網站
 
-- 用官方證交所、櫃買中心最新行情 API 取得「代號／當前中文名稱」，支援中文名稱搜尋與已知名單備援。
-- 用 `yfinance` 取得選定股票的日線資料（歷史行情）。
-- 示範 RSI(14) 50 穿越、KD(9,3,3) K/D 交叉、MACD(12,26,9) 交叉；統計 1/3/5/10/20 **交易日**後的方向命中率。
-- 輸出一般樣本成功率、近期半衰期加權成功率、樣本數、Wilson 95% 區間和未扣交易成本的方向報酬。
-- 回測完成後可下載 CSV，含中文名稱和代號；下載不會把畫面清空。
-- **選擇權試算已移除**。沒有券商自動下單功能。
+1. 在瀏覽器下載 ZIP，解壓縮後會看到 `app.py`, `indicators.py`, `formulas.py`, `signal_engine.py`, `stock_names.py`, `requirements.txt`, `test_signals.py`, `README.md`。
+2. 開啟你**原本已連結 Streamlit 的 GitHub Repository**，進到專案根目錄（上方不要多一層資料夾）。
+3. 按 `Add file → Upload files`，把上面的八個檔案（**不是 ZIP**）上傳到根目錄，提交到目前 Streamlit 使用的分支。對同名檔案進行更新。如果平台拒絕同名上傳，可以使用 GitHub 網頁版的 `github.dev` 編輯器更新後提交，無需安裝軟體。
+4. 開啟你原本的 `*.streamlit.app` 網址。Community Cloud 會依 Repository 的新提交自動重新載入，安裝 `requirements.txt` 內相依套件。
+5. 若**尚未部署**，才到 https://share.streamlit.io/ Create app：Repository 選你剛才的專案、Branch 選真實分支（常見 `main`）、Main file path 填 `app.py`。
+6. 首頁應顯示 `v0.6`。選 `2454｜聯發科`、12 個月、1/3/5/10/20 個交易日，按「開始回測」；可以進「最新交易訊號」直接調整門檻 90 → 80 → 95，確認結果更新。
 
-## 需要注意
+## 網頁上的四個頁籤
 
-- 日線收盤後才產生訊號，評估下一交易日開盤以後的方向，**不是當沖回測**。
-- 勝率不能直接視為未來機率，也不是扣除交易成本後的正期望值。
-- 尚缺 1 分鐘／5 分鐘成交資料、滑價、費稅、外樣本驗證；因此不應直接用於真實交易決策。
-- 行情與中文名稱依賴第三方／官方網站，雲端若出現網路限制，可能會顯示資料取得失敗或有限離線備援清單。
-- GitHub 與 Streamlit Cloud 若使用公開 Repo，所有人都能看程式。勿上傳券商帳密、API token、交易明細、身份資訊。
+| 頁籤 | 內容 |
+|---|---|
+| 🎯 最新交易訊號 | 買入／賣出／觀望、最新已完成日 K 日期、可調勝算門檻、樣本數與近期檢查，以及 10 種指標的逐項判斷表 |
+| 📊 歷史回測結果 | 10 指標 × 買/賣 × 1/3/5/10/20 交易日，歷史／成本後／近期加權成功率、Wilson 區間、報酬與 CSV |
+| 📐 十種指標計算公式 | MA、EMA、KD、MACD、布林通道、RSI、斐波那契回調、一目均衡表、標準差、ADX；數學式、初始值、訊號規則與原始 Python 計算程式 |
+| 🔍 原始數據與逐日核對 | 每日 OHLC、十種指標中間值、訊號值，CSV 可與 Excel 或券商指標對照 |
 
-## 檔案架構（直接放 GitHub 最上層）
+## 最新訊號的精確判斷規則
 
-```text
-你的 GitHub Repository/
-├── app.py                # Streamlit 網頁與回測引擎
-├── stock_names.py        # 中文名稱查詢
-├── requirements.txt      # Streamlit 自動安裝的套件
-├── test_stock_names.py   # 可選：名稱模組測試
-└── README.md             # 本說明
+**預設：** `成功率門檻 = 90%`；`歷史最低樣本 = 20 筆`；`近期加權必須 > 90% = 勾選`；`近期有效樣本數至少 = 5 筆`；`成本往返假設 = 0.45%`（僅示範、可自行改）。
+
+1. 今天最新一根日 K **有發生新的買／賣事件**。
+2. 相同的指標、方向、預測期限的**歷史已完成訊號**數量達歷史最低樣本。
+3. 「**簡化成本後命中率**」嚴格 **>** 自訂門檻（等於不算通過）。
+4. 如果勾選「近期確認」，也要求近期加權命中率 **>** 同一門檻，且有效樣本數達最低值。近期反轉的失效策略不再單靠歷史好勝率繼續發出買入。
+5. 只有看漲通過→**買入**；只有看跌通過→**賣出**；沒有通過或多空同時通過→**觀望**。
+6. 如果資料尚未更新今日的完整 K 線，或選了過去日期，畫面明示「觀望／歷史模擬」，不偽稱是即時訊號。
+
+### 公式
+
+歷史成本後命中率 = 成本後方向報酬 > 0 的已完成訊號次數 / 已完成訊號總數 × 100%。
+
+近期加權：每個完成訊號的權重 `w_i = 0.5 ** (age_trading_days / half_life)`，近期加權成功率 = `sum(w_i*is_win_i) / sum(w_i)`；有效樣本數 `N_eff = sum(w_i)**2 / sum(w_i**2)`。
+
+回測規則：交易日 `t` 收盤才出現訊號，於 `t+1` 交易日**開盤**假設進場，於 `t+h` 交易日**收盤**評估結果；只用已有 `t+h` 的歷史訊號，不拿未來資料算今天勝率。`h` 是交易日數，不是日曆日數。交易成本目前是統一加總百分比折減，不是精確的券商費率/稅制模型。
+
+## 已知限制
+
+- 1/3/5/10/20 都是 **日線**預測期，不是當沖交易持倉。需要先有合法可用的 1 分鐘／5 分鐘歷史行情與實際成交模型，才能做當沖回測。
+- 同一筆訊號可能會跨越多個重疊持倉區間；Wilson 95% 區間只是二項式近似，不能排除獨立性問題。
+- 多策略、多參數反覆篩選會高估樣本內勝率，下一版應加入訓練／外樣本分離與 walk-forward 驗證。
+- 每次重新部署或頁面重啟時，Streamlit Session 狀態可能消失，重新按「開始回測」即可。
+
+## 程式核對
+
+透過 GitHub 可直接看 `indicators.py`、`formulas.py`、`signal_engine.py` 和 `test_signals.py`。
+
+本版在開發環境已通過 16 項離線單元測試，包含十指標、未來資料防漏、時序進出場、扣成本、門檻改動、90% 邊界、近期失效、樣本數不足、多空矛盾與資料過舊等情境。尚未由使用者的 Streamlit 線上環境實際驗證。
+
+```
+python -m unittest -v test_signals.py
 ```
 
-### 錯誤排查
-
-- `This file does not exist` → Main file path 請填 `app.py`，並確認 GitHub 根目錄的 `app.py` 存在。
-- `This branch does not exist` → 到 GitHub Repository 頁面確認分支名稱，如 `main`，不要沿用預設的 `master`。
-- `ModuleNotFoundError` → 確認 `requirements.txt` 與 `app.py` 在同一層，且 `stock_names.py` 有一起上傳。
-- Yahoo Finance 回傳空資料 → 換個日期／代號或稍後再試；單一資料源可能有速率限制。
+以上測試命令只用於 GitHub 開發者自動化；使用者無須在本機執行。
