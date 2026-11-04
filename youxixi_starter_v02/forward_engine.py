@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 
 import numpy as np
@@ -122,10 +121,14 @@ def predict_day(prices: pd.DataFrame, signals: dict[str,pd.Series], ledger: pd.D
     sides={c['方向'] for c in good}
     best=(max(good,key=lambda x:(x['Wilson 95% 下界%'],x['符合限價樣本數'],x['平均扣成本報酬%'])) if good
           else None)
+    if len(sides)>1:
+        best=None  # 多空同時符合：不硬選方向，回測應保留風險訊號。
     if not active:
         verdict, reason='觀望','收盤時十種技術指標都沒有觸發新進場訊號。'
+    elif len(sides)>1:
+        verdict, reason='觀望','同時出現通過驗證的看漲與看跌訊號，方向衝突，暫不推薦進場。'
     elif not good:
-        verdict, reason='觀望','目前各指標和回測期間都未通過最低有效樣本、勝率與近期表現檢查。'
+        verdict, reason='觀望','各指標與期間尚無足夠的正期望值和穩定性證據，暫不推薦進場。'
     else:
         verdict='買入' if best['方向']=='看漲' else '賣出'
         reason=(f"綜合比較十種指標和五個期間，以 {best['技術指標']}／{best['回測期間']} 作為目前研究性候選；"
@@ -133,7 +136,15 @@ def predict_day(prices: pd.DataFrame, signals: dict[str,pd.Series], ledger: pd.D
                 + ('其他指標亦有相反方向的合格訊號，存在衝突，請審慎看待。' if len(sides)>1 else ''))
 
     # 也提供離門檻最近的「研究性候選」供觀望時查看，不能當成下單建議。
-    preview=(max(candidate_rows,key=lambda x:(x['符合限價樣本數'],x['Wilson 95% 下界%'])) if candidate_rows else None)
+    # 當前期間沒有可成交樣本，Wilson 下界是 None；比較時必須正規化。
+    def safe_score(value, default=-1.0):
+        try:
+            number=float(value)
+            return number if math.isfinite(number) else default
+        except (TypeError, ValueError):
+            return default
+    preview=(max(candidate_rows,key=lambda x:(int(x['符合限價樣本數']),
+                safe_score(x['Wilson 95% 下界%']))) if candidate_rows else None)
     return {'日期':T.strftime('%Y-%m-%d'),'參考收盤價':close,'判斷':verdict,
             '原因':reason,'主要模型':best, '研究性候選':preview,
             '候選明細':candidate_rows}
