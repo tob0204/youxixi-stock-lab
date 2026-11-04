@@ -1,0 +1,2 @@
+trade_id,trade_date,instrument,side,signal_name,signal_asof,entry_time,exit_time,entry_premium_points,exit_premium_points,contracts,point_value_ntd,fees_and_tax_ntd,realized_pnl_ntd,reason,notes
+PAPER001,2026-11-04,TXO PAPER LONG CALL,BUY_TO_OPEN->SELL_TO_CLOSE,RSI14_cross50,2026-11-03,09:15,09:45,20,30,1,50,60,440,DEMO_ONLY,示範數據非真實交易
