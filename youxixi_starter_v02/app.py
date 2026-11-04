@@ -19,7 +19,7 @@ import streamlit as st
 import yfinance as yf
 
 from indicators import DEFAULTS, NAMES, compute_indicators, make_signals
-from formulas import formula_sections
+from formulas import formula_sections, signal_catalog
 from stock_names import fetch_stock_names, find_stock_name
 from window_engine import WINDOW_LABELS
 from audit_engine import build_ledger, dates_tooltip
@@ -27,7 +27,7 @@ from forward_engine import predict_day, walk_forward
 from scan_engine import scan_batch
 from sector_engine import load_official_industries, sectors_summary, INDUSTRIES
 
-VERSION = "v0.9"
+VERSION = "v1.0"
 COST_PCT = 0.45  # 示範用，非券商實際費率；均為報酬率百分點。
 RECENT_HALFLIFE = 20  # 開發者自動風控，不要求使用者調整。
 RECENT_MIN_EFFECTIVE_N = 3
@@ -35,8 +35,8 @@ HORIZON = 1
 # 自動證據篩選：不暴露勝率門檻給使用者，避免不斷調到恰好出現訊號。
 AUTO_BASELINE_WIN_RATE = 50.0
 AUTO_MIN_FILLED_SAMPLES = 8
-MAX_SCAN_PER_ACTION = 100
-SCAN_BATCH_SIZE = 20
+MAX_SCAN_PER_ACTION = 40
+SCAN_BATCH_SIZE = 10
 st.set_page_config(page_title="油洗洗｜隔日訊號回測", page_icon="📈", layout="wide")
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -66,13 +66,13 @@ def fetch_daily(code: str, market: str, start: str, end_exclusive: str):
             p=p.loc[~p.index.duplicated(keep="last")].sort_index()
             p=p.replace([np.inf,-np.inf],np.nan).dropna(subset=["Open","High","Low","Close"])
             p=p.loc[(p["Open"]>0)&(p["Close"]>0)]
-            if len(p)<380:
-                errs.append(ticker+": 歷史日線不足 380 根")
+            if len(p)<160:
+                errs.append(ticker+f": 只取得 {len(p)} 根日線（需至少 160 根作指標暖機）")
                 continue
             return p,ticker
         except Exception as e:
             errs.append(ticker+": "+str(e)[:75])
-    raise ValueError("無法取得充分行情。"+"；".join(errs))
+    raise ValueError("行情來源查詢未成功或可用日線不足。這不代表股票不存在："+"；".join(errs))
 
 
 def format_money(value, suffix="元"):
@@ -126,6 +126,55 @@ def hover_candidates_html(candidates:list[dict], min_samples=8):
                     f'<td>{rate}</td><td>{escape(limit)}</td><td>{tag}</td></tr>')
     rows.append('</tbody></table></div><small>ⓘ 滑鼠停在「成功／成交樣本」數字上，可查看每筆訊號日、結果日、成功或失敗；下方可查看全部紀錄。</small>')
     return ''.join(rows)
+
+
+def show_clickable_samples(candidates:list[dict], key:str, title='點選回測列，查看全部樣本日期'):
+    """Streamlit 官方 row selection：點一列 → 下方立即顯示該列的完整已完成樣本。"""
+    if not candidates:
+        st.info('今天沒有觸發可檢視的訊號；可在原始資料查過往事件。')
+        return
+    def _rank(row):
+        def score(x):
+            try: return float(x) if x is not None and math.isfinite(float(x)) else -1.
+            except (ValueError,TypeError): return -1.
+        return (int(bool(row['達標'])),score(row['Wilson 95% 下界%']),int(row['符合限價樣本數']))
+    ordered=sorted(candidates,key=_rank,reverse=True)
+    frame=candidates_frame(ordered)
+    # 顯示與選取都使用相同排序，避免點第 3 列卻讀取第 3 個原始訊號。
+    cols=['技術指標','方向','回測期間','歷史同訊號','符合限價樣本',
+          '成功筆數','樣本內勝率%','近期驗證%','估計限價','平均淨報酬%','判讀']
+    st.caption(title+'；樣本數是符合假設限價且結果已知的筆數，含成功與失敗。')
+    event=st.dataframe(frame[cols],hide_index=True,use_container_width=True,
+                       on_select='rerun',selection_mode='single-row',key=key,
+                       height=min(480,60+len(frame)*35))
+    selected=list(event.selection.rows)
+    if not selected:
+        st.caption('👆 請直接點擊上方表格任一列（尤其是樣本數欄），下方會展開那個指標／期間的全部日期。')
+        return
+    row_index=selected[0]
+    if row_index<0 or row_index>=len(ordered):
+        return
+    item=ordered[row_index]
+    ledger=item.get('成交樣本明細',pd.DataFrame())
+    indicator=item['技術指標']; window=item['回測期間']
+    st.markdown(f'#### 📅 {indicator}｜{window}｜{item["方向"]}')
+    if ledger.empty:
+        st.info('本組沒有已完成且符合進場限價假設的歷史樣本。')
+        return
+    details=ledger.copy().sort_values('訊號日',ascending=False)
+    details.insert(0,'回測判定',np.where(details['是否成功'],'成功','失敗'))
+    a,b,c=st.columns(3)
+    a.metric('全部已完成樣本',len(details))
+    b.metric('成功／失敗',f"{details['是否成功'].sum()}／{(~details['是否成功']).sum()}")
+    c.metric('樣本內淨獲利勝率',f"{100*details['是否成功'].mean():.1f}%")
+    cols=['回測判定','訊號日','進場日','結果日','訊號收盤價','下一日開盤價',
+          '結果日收盤價','扣成本後報酬%','方向','技術指標']
+    st.dataframe(details[[x for x in cols if x in details]],hide_index=True,
+                 use_container_width=True,height=min(500,70+len(details)*36))
+    st.download_button('下載這一列所有樣本 CSV',details.to_csv(index=False).encode('utf-8-sig'),
+                       file_name=f'youxixi_samples_{key}_{row_index}.csv',mime='text/csv',key=f'download_{key}')
+    if '（狀態）' in indicator:
+        st.warning('這是持續狀態策略：連續相鄰交易日可能重複出現，樣本結果高度相關，不可全部視為獨立實驗。')
 
 
 def stable_checks(best, candidates, threshold, min_samples):
@@ -183,8 +232,10 @@ def scan_sector_chunk(codes, names_for_sector, start, end, now_date):
                       RECENT_HALFLIFE, RECENT_MIN_EFFECTIVE_N, True, COST_PCT)
 
 st.title('📈 油洗洗｜收盤後預測下一個交易日')
-st.caption(f'{VERSION} · GitHub + Streamlit 網頁版 · 十指標 × 2週／1／3／6／12個月自動比較 · 只預測下一交易日')
+st.caption(f'{VERSION} · 10 類指標／20 種獨立訊號規則 × 五期間自動比較 · 隔日開盤至收盤方向研究')
 names, source_errors=stock_directory()
+profiles,sources,profile_errors=sector_directory()
+categories=sectors_summary(profiles) if profiles else {}
 with st.sidebar:
     st.header('股票查詢')
     codes=sorted(names)
@@ -197,9 +248,24 @@ with st.sidebar:
     run=st.button('📊 分析這檔股票',type='primary',use_container_width=True)
     st.divider()
     st.caption('其他設定交給系統：當日最後完整收盤、十種技術指標、五種歷史窗、下一交易日、近期驗證。')
-    if source_errors:
-        with st.expander('中文名稱來源狀態'):
-            for error in source_errors: st.warning(error)
+    st.divider()
+    st.header('🏭 依產業海選')
+    if categories:
+        ids=sorted(categories.keys())
+        chosen=st.selectbox('選擇產業',ids,
+              format_func=lambda i:f'{INDUSTRIES.get(i,i)}（{len(categories[i])} 檔）',
+              key='sector_picker_v10')
+        selected_codes=categories[chosen]
+        scan_early=datetime.now(ZoneInfo('Asia/Taipei')).weekday()<5 and datetime.now(ZoneInfo('Asia/Taipei')).time()<time(14,30)
+        scan_pressed=st.button('🔎 掃描這個產業',type='secondary',use_container_width=True,disabled=scan_early)
+        reset_pressed=st.button('清除本產業掃描結果',use_container_width=True)
+    else:
+        chosen=None; selected_codes=[]; scan_pressed=False; reset_pressed=False
+        st.warning('產業分類資料來源目前無法連線，暫停掃描。')
+    st.caption('執行掃描後可到右側「產業掃描結果」查看進度；不掃其他產業。')
+    if source_errors or profile_errors:
+        with st.expander('資料來源狀態'):
+            for error in source_errors+profile_errors: st.warning(error)
 
 if run:
     if not re.fullmatch(r'\d{4,6}(?:\.(?:TW|TWO))?',code):
@@ -235,8 +301,8 @@ if same:
         st.error(f'回測引擎出現異常：{exc}。可至 Streamlit 日誌取得詳細追蹤。')
 
 tab1,tab2,tab3,tab4,tab5=st.tabs([
-    '🎯 明日買賣訊號','🏭 依產業海選','🔎 逐日前推與樣本日期',
-    '📐 十種指標公式','🗂️ 原始指標數值'])
+    '🎯 明日買賣訊號','🏭 產業掃描結果','🔎 逐日前推與樣本日期',
+    '📐 技術指標公式與訊號規則','🗂️ 原始指標數值'])
 
 with tab1:
     st.subheader('個股：收盤後對下一交易日的預測')
@@ -265,30 +331,20 @@ with tab1:
                 p=forecast['研究性候選']
                 st.caption(f"仍可核對未達標候選：{p['技術指標']}／{p['回測期間']}，"
                            f"樣本 {p['符合限價樣本數']}，目前不作買賣推薦。")
-        with st.expander('為什麼是這個結果？其他所有指標與期間'):
+        with st.expander('看完整技術訊號比較、點選樣本數即可核對日期',expanded=True):
             st.write(forecast['原因'])
-            st.dataframe(candidates_frame(forecast['候選明細']),
-                         use_container_width=True,hide_index=True)
+            show_clickable_samples(forecast['候選明細'],'home_evidence_v10')
         st.caption(f'自動採用基本證據標準：至少 {AUTO_MIN_FILLED_SAMPLES} 筆歷史符合限價樣本、'
                    '扣成本後平均報酬為正、近期表現未明顯失效；不讓使用者反覆調勝率門檻以製造訊號。'
                    '本版只有日 K，不能證明實際盤中委託與放空可成交。')
 
 with tab2:
-    st.subheader('依產業海選｜只顯示下一交易日買入／賣出候選')
-    st.caption('先選一個官方產業，按一次「掃描此產業」；不會掃其他產業。交易對象限上市／上櫃四碼股票。')
-    profiles,sources,profile_errors=sector_directory()
-    if profile_errors:
-        for err in profile_errors: st.warning(err)
-    if not profiles:
-        st.error('官方公司產業分類目前無法取得。為避免錯誤分組，暫停海選。')
+    st.subheader('產業掃描結果｜只列下一交易日的買入／賣出候選')
+    st.caption('產業請在左側選擇；按「掃描這個產業」只查該產業的股票，無建議的觀望股票不列出。')
+    if not categories or chosen is None:
+        st.error('未取得官方產業分類；請檢查左側「資料來源狀態」。')
     else:
-        categories=sectors_summary(profiles)
-        ids=sorted(categories.keys())
-        chosen=st.selectbox('選擇產業',ids,
-             format_func=lambda i:f'{INDUSTRIES.get(i,i)}（{len(categories[i])} 檔；{i}）')
-        selected_codes=categories[chosen]
-        st.caption(f'資料來源：{"、".join(sources)}公司基本資料，產業「{INDUSTRIES[chosen]}」，'
-                   f'共 {len(selected_codes)} 檔。沒有分類資料的個股不擅自加入。')
+        st.caption(f'資料來源：{"、".join(sources)}。目前產業 {INDUSTRIES.get(chosen,chosen)}；{len(selected_codes)} 檔。')
         now=datetime.now(ZoneInfo('Asia/Taipei'))
         # 股票資料缺日仍不可用最近幾天的訊號冒充已核對今日收盤的結論。
         day_key=now.date().isoformat()
@@ -301,10 +357,6 @@ with tab2:
         scan_early=now.weekday()<5 and now.time()<time(14,30)
         if scan_early:
             st.info('台股今日尚未收盤，請等待完整收盤資料更新後再進行下一交易日海選。')
-        btn,reset_col=st.columns([4,1])
-        scan_pressed=btn.button('🔍 掃描此產業的明日候選',type='primary',use_container_width=True,
-                                disabled=(state['next']>=len(selected_codes) or scan_early))
-        reset_pressed=reset_col.button('重置本產業結果',use_container_width=True)
         if reset_pressed:
             state={'key':scan_key,'next':0,'rows':[]}
             all_states[chosen]=state
@@ -339,7 +391,7 @@ with tab2:
         c.metric('買賣候選',len(valid))
         if done<len(selected_codes):
             st.info('此產業尚未全部掃描，結果是部分清單。再次按「掃描此產業」只會接續本產業未掃描的股票。'
-                    '為降低免費雲端服務被公開報價限流的風險，每次最多處理 100 檔。')
+                    '為降低免費雲端服務被公開報價限流的風險，每次最多處理 40 檔。')
         else:
             st.success('此產業的本次掃描已完成（有資料讀取失敗者仍會另外計數）。')
         if not valid.empty:
@@ -352,7 +404,7 @@ with tab2:
         elif done:
             st.info('目前已完成部分尚無符合自動證據檢查的買入／賣出候選；觀望股票不列入表格。')
         else:
-            st.info('請選擇產業後按「掃描此產業」，開始尋找買入／賣出候選。')
+            st.info('請先從左側選擇產業，再按「掃描這個產業」。')
         if not data.empty and '狀態' in data.columns:
             fails=data[data['狀態']!='成功']
             st.caption(f'已處理 {done} 檔，其中 {len(fails)} 檔因缺資料或報價服務限制無法完成。')
@@ -363,23 +415,12 @@ with tab2:
                    '掃描使用公開歷史日 K，報價來源可能限速、更新延遲或缺漏。')
 
 with tab3:
-    st.subheader('逐日往前模擬：每一天只能使用前一交易日已完成的資訊')
+    st.subheader('逐日往前模擬與樣本日期｜點一列直接展開全部紀錄')
     if not same or forecast is None:
         st.info('請先在左側分析一檔股票。')
     else:
-        st.markdown('**最新訊號歷史樣本：滑鼠移到「成功／樣本」可查看日期**')
-        st.html(hover_candidates_html(forecast['候選明細'],AUTO_MIN_FILLED_SAMPLES))
-        candidates=forecast['候選明細']
-        if candidates:
-            idx=st.selectbox('完整檢查一組指標的成功／失敗日子',range(len(candidates)),
-                 format_func=lambda i:f"{candidates[i]['技術指標']}｜{candidates[i]['回測期間']}｜{candidates[i]['方向']}")
-            m=candidates[idx]
-            dates=m.get('成交樣本明細',pd.DataFrame())
-            if not dates.empty:
-                st.dataframe(dates.sort_values('訊號日',ascending=False),hide_index=True,use_container_width=True)
-                st.download_button('匯出這組完整樣本 CSV',dates.to_csv(index=False).encode('utf-8-sig'),
-                    file_name=f'youxixi_{code}_dates.csv',mime='text/csv')
-            else: st.info('這組沒有符合進場價格的已完成樣本。')
+        st.markdown(f'**{saved["name"]}（{saved["code"]}）｜資料截至 {prices.index[-1]:%Y-%m-%d}**')
+        show_clickable_samples(forecast['候選明細'],'audit_evidence_v10')
         st.divider()
         st.write('**往前一年，逐日重新訓練並驗證下一交易日的結果**')
         key=(code,str(prices.index[-1].date()),VERSION)
@@ -411,11 +452,16 @@ with tab3:
         st.caption('逐日前推勝率與事後對過去某段期間的樣本內勝率不同。逐日前推才是比較接近實際驗證的統計。')
 
 with tab4:
-    st.subheader('十種技術指標計算公式、參數與訊號規則')
+    st.subheader('十類技術指標｜公式、訊號定義及來源核對')
+    st.info('同一技術指標可以有「當日交叉事件」和「持續狀態」，這兩者在新版分開回測。下面公開初值、公式、訊號判定；不是宣稱所有規則都具有統計優勢。')
     for n,(title,label,formula,url) in enumerate(formula_sections(DEFAULTS),start=1):
         with st.expander(f'{n}. {title}｜{label}'):
             st.markdown(formula)
             st.markdown(f'[外部參考資料]({url})')
+    st.markdown('### 20 種訊號規則核對表')
+    st.dataframe(pd.DataFrame(signal_catalog(),columns=['程式中使用的訊號名稱','精確判定條件','訊號類型']),
+                 hide_index=True,use_container_width=True)
+    st.caption('來源：StockCharts ChartSchool／Fidelity；特殊的臺灣遞迴 KD 與自訂斐波那契規則均明確標示版本。')
     with st.expander('查看系統實際計算程式碼'):
         st.code(inspect.getsource(compute_indicators),language='python')
         st.code(inspect.getsource(make_signals),language='python')
@@ -434,8 +480,8 @@ with tab5:
 st.divider()
 with st.expander('⚠️ 模型與實際交易限制'):
     st.markdown("""- 日 K 模型：今天收盤後分析，假設下一交易日開盤價格滿足限價即成交、當日收盤平倉。**目前不是分鐘 K 或真實盤中成交回測**。
-- 系統自動挑選五種歷史窗口與十個指標，仍可能出現事後挑選最佳值與多重比較偏誤；樣本內成功率不是明日真實勝率。
-- 逐日前推每一天只能使用當時完成的歷史資料，但目前股票名單未做歷史成分股重建，產業海選仍有倖存者偏誤。
+- 系統自動挑選五種歷史窗口與二十種策略規則，仍可能出現事後挑選最佳值與多重比較偏誤；樣本內成功率不是明日真實勝率。
+- 20 種訊號規則與五段重疊回測窗屬多重比較；狀態型策略相鄰日樣本不獨立。逐日前推每一天只能使用當時完成的歷史資料，但目前股票名單未做歷史成分股重建，產業海選仍有倖存者偏誤。
 - 預設成本 0.45% 僅是示例，不代表券商真實手續費、交易稅、融券成本或滑價。
 - 「賣出」是看跌方向統計代理，**不等於可以合法或實務上立即放空**；要真正當沖必須核對個股當沖資格、交易制度與報價流動性。
 - 若當天尚未有完整日 K、官方產業 API 回覆不完整或行情來源限流，不會把舊資料／未掃描股票冒充最新有效研究結果。

@@ -38,7 +38,7 @@ def _hist_stats(data: pd.DataFrame, close: float, direction: int,
     if not n:
         return dict(total=0, filled=0, rate=float('nan'), rate_all=float('nan'),
                     weighted=float('nan'), eff_n=0., win=0, limit=None,
-                    projected_close=None, low=None, avg=float('nan'), filled_ledger=pd.DataFrame(),
+                    projected_close=None, low=None, avg=float('nan'), filled_ledger=data.copy(),
                     close_band=(None,None))
     gaps=data['隔日跳空%'].to_numpy(float)/100
     # buy limit higher allows more fills; sell threshold lower allows more fills

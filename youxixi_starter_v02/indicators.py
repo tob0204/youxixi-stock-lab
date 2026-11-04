@@ -29,6 +29,45 @@ NAMES = ["MA 移動平均線", "EMA 指數平滑移動平均線", "KD 隨機指�
          "布林通道", "RSI 相對強弱指數", "斐波那契回調", "一目均衡表", "標準差（Z-score）", "ADX 趨勢強度"]
 
 
+def _ema_sma_seed(close: pd.Series, period: int) -> pd.Series:
+    """標準 EMA：第 period 筆先以 period 日 SMA 起始，之後 α=2/(period+1) 遞推。
+
+    與 pandas ewm(adjust=False) 直接以第一筆價起始的定義不同；
+    採 StockCharts ChartSchool 常見定義並公開初值，以便核對。
+    """
+    arr = close.to_numpy(dtype=float)
+    result = np.full(len(arr), np.nan)
+    if len(arr) < period:
+        return pd.Series(result,index=close.index)
+    seed = arr[:period]
+    if not np.isfinite(seed).all():
+        return pd.Series(result,index=close.index)
+    result[period-1] = seed.mean()
+    alpha = 2.0 / (period + 1)
+    for i in range(period, len(arr)):
+        if np.isfinite(arr[i]):
+            result[i] = alpha * arr[i] + (1.0 - alpha) * result[i-1]
+    return pd.Series(result,index=close.index)
+
+
+def _ema_valid_seed(values: pd.Series, period: int) -> pd.Series:
+    """MACD 的 DEA：從首筆有效 DIF 起，以 period 筆 DIF 的 SMA 當初值。"""
+    arr = values.to_numpy(dtype=float)
+    res = np.full(len(arr), np.nan)
+    positions = np.flatnonzero(np.isfinite(arr))
+    if len(positions) < period:
+        return pd.Series(res, index=values.index)
+    first = int(positions[0]); end = first + period
+    if end > len(arr) or not np.isfinite(arr[first:end]).all():
+        return pd.Series(res, index=values.index)
+    res[end-1] = arr[first:end].mean()
+    a = 2.0 / (period + 1)
+    for j in range(end,len(arr)):
+        if np.isfinite(arr[j]):
+            res[j] = a * arr[j] + (1-a) * res[j-1]
+    return pd.Series(res,index=values.index)
+
+
 def _wilder_seeded(values: pd.Series, period: int, first_index: int) -> pd.Series:
     """第一筆為 first_index 之前 period 筆有效數據的 SMA，再用 Wilder RMA 遞推。"""
     arr = np.asarray(values, dtype=float)
@@ -131,12 +170,12 @@ def compute_indicators(prices: pd.DataFrame, params: Mapping[str, int | float] |
             n = int(p[f"{stem}_{speed}"])
             col = f"{stem.upper()}{'短' if speed == 'fast' else '長'}"
             v[col] = (close.rolling(n, min_periods=n).mean() if stem == "ma" else
-                      close.ewm(span=n, min_periods=n, adjust=False).mean())
+                      _ema_sma_seed(close,n))
     v["RSV"], v["K"], v["D"] = _kd(high, low, close, int(p["kd_window"]), int(p["kd_smooth"]))
-    fast = close.ewm(span=int(p["macd_fast"]), min_periods=int(p["macd_fast"]), adjust=False).mean()
-    slow = close.ewm(span=int(p["macd_slow"]), min_periods=int(p["macd_slow"]), adjust=False).mean()
+    fast = _ema_sma_seed(close,int(p["macd_fast"]))
+    slow = _ema_sma_seed(close,int(p["macd_slow"]))
     v["DIF"] = fast - slow
-    v["DEA"] = v["DIF"].ewm(span=int(p["macd_signal"]), min_periods=int(p["macd_signal"]), adjust=False).mean()
+    v["DEA"] = _ema_valid_seed(v["DIF"],int(p["macd_signal"]))
     v["MACD柱"] = v["DIF"] - v["DEA"]
     n = int(p["bb_window"])
     v["布林中"] = close.rolling(n, min_periods=n).mean()
@@ -171,42 +210,57 @@ def _cross(a: pd.Series, b: pd.Series) -> pd.Series:
     return pd.Series(np.select([up, down], [1, -1], default=0), index=a.index, dtype=int)
 
 
-def make_signals(values: pd.DataFrame, params: Mapping[str, int | float] | None = None) -> dict[str, pd.Series]:
-    p = {**DEFAULTS, **(dict(params) if params else {})}
-    close = values["收盤"]
-    rsi50 = pd.Series(50.0, index=values.index)
-    bbuy = (close > values["布林上"]) & (close.shift() <= values["布林上"].shift())
-    bsell = (close < values["布林下"]) & (close.shift() >= values["布林下"].shift())
-    fibbuy = ((values["Fib趨勢"] == 1) & (values["Fib趨勢"].shift() == 1)
-              & close.gt(values["Fib61.8"]) & close.shift().le(values["Fib61.8"].shift()))
-    fibsell = ((values["Fib趨勢"] == -1) & (values["Fib趨勢"].shift() == -1)
-               & close.lt(values["Fib61.8"]) & close.shift().ge(values["Fib61.8"].shift()))
-    top = values[["雲A(當日可見)", "雲B(當日可見)"]].max(axis=1)
-    bottom = values[["雲A(當日可見)", "雲B(當日可見)"]].min(axis=1)
-    cloud_ok = values[["雲A(當日可見)", "雲B(當日可見)"]].notna().all(axis=1)
-    cloudbuy = cloud_ok & cloud_ok.shift(fill_value=False) & close.gt(top) & close.shift().le(top.shift())
-    cloudsell = cloud_ok & cloud_ok.shift(fill_value=False) & close.lt(bottom) & close.shift().ge(bottom.shift())
-    z = values["Z分數"]
-    zlimit = float(p["std_z"])
-    zbuy = z.gt(-zlimit) & z.shift().le(-zlimit)
-    zsell = z.lt(zlimit) & z.shift().ge(zlimit)
-    di_cross = _cross(values["+DI"], values["-DI"])
-    adx_strength = values["ADX"] >= float(p["adx_threshold"])
-    di_cross = di_cross.where(adx_strength, 0).astype(int)
+def _state_flags(bull: pd.Series, bear: pd.Series, valid: pd.Series) -> pd.Series:
+    """狀態訊號：狀態仍在時每日都計一次『隔日預測』，不是『當天新交叉』。"""
+    b = valid & bull & ~bear
+    s = valid & bear & ~bull
+    return pd.Series(np.select([b,s],[1,-1],default=0),index=b.index,dtype=int)
+
+
+def make_signals(values: pd.DataFrame, params: Mapping[str,int|float]|None=None) -> dict[str,pd.Series]:
+    """依公開技術分析概念產生**分開記帳**的訊號型態。
+
+    事件型與狀態型分開：狀態型每天可能有樣本，交易結果相依，
+    不可以把 K>D 連續 20 天當成 20 次獨立實驗。
+    """
+    p={**DEFAULTS,**(dict(params) if params else {})}
+    close=values['收盤']
     def flags(buy, sell):
-        return pd.Series(np.select([buy & ~sell, sell & ~buy], [1, -1], default=0), index=close.index, dtype=int)
-    return {
-        NAMES[0]: _cross(values["MA短"], values["MA長"]),
-        NAMES[1]: _cross(values["EMA短"], values["EMA長"]),
-        NAMES[2]: _cross(values["K"], values["D"]),
-        NAMES[3]: _cross(values["DIF"], values["DEA"]),
-        NAMES[4]: flags(bbuy, bsell),
-        NAMES[5]: _cross(values["RSI"], rsi50),
-        NAMES[6]: flags(fibbuy, fibsell),
-        NAMES[7]: flags(cloudbuy, cloudsell),
-        NAMES[8]: flags(zbuy, zsell),
-        NAMES[9]: di_cross,
+        return pd.Series(np.select([buy & ~sell, sell & ~buy],[1,-1],default=0),index=close.index,dtype=int)
+    valid=lambda *cols: values[list(cols)].notna().all(axis=1)
+    k=values['K']; d=values['D']; rsi=values['RSI']; hist=values['MACD柱']
+    bbhi=values['布林上']; bblo=values['布林下']
+    top=values[['雲A(當日可見)','雲B(當日可見)']].max(axis=1)
+    bottom=values[['雲A(當日可見)','雲B(當日可見)']].min(axis=1)
+    cloud_ok=valid('雲A(當日可見)','雲B(當日可見)')
+    trend=values['Fib趨勢']; fib=values['Fib61.8']
+    z=values['Z分數']; zlimit=float(p['std_z'])
+    di_cross=_cross(values['+DI'],values['-DI'])
+    adx_ok=values['ADX'].ge(float(p['adx_threshold']))
+    cross_kd=_cross(k,d)
+    out = {
+      'MA｜短長均線黃金／死亡交叉':_cross(values['MA短'],values['MA長']),
+      'MA｜短長均線多／空排列（狀態）':_state_flags(values['MA短']>values['MA長'],values['MA短']<values['MA長'],valid('MA短','MA長')),
+      'EMA｜短長均線黃金／死亡交叉':_cross(values['EMA短'],values['EMA長']),
+      'EMA｜短長均線多／空排列（狀態）':_state_flags(values['EMA短']>values['EMA長'],values['EMA短']<values['EMA長'],valid('EMA短','EMA長')),
+      'KD｜K/D 黃金／死亡交叉':cross_kd,
+      'KD｜K＞D 多頭／K＜D 空頭（狀態）':_state_flags(k>d,k<d,valid('K','D')),
+      'KD｜K 上穿20／下穿80（事件）':flags(k.gt(20)&k.shift().le(20)&valid('K'),k.lt(80)&k.shift().ge(80)&valid('K')),
+      'MACD｜DIF/DEA 黃金／死亡交叉':_cross(values['DIF'],values['DEA']),
+      'MACD｜柱狀體正／負（狀態）':_state_flags(hist>0,hist<0,valid('MACD柱')),
+      'MACD｜DIF 上／下穿零軸（事件）':_cross(values['DIF'],pd.Series(0.0,index=close.index)),
+      '布林｜突破上／下軌（趨勢事件）':flags(close.gt(bbhi)&close.shift().le(bbhi.shift())&valid('布林上'),close.lt(bblo)&close.shift().ge(bblo.shift())&valid('布林下')),
+      '布林｜跌破下軌後收回／突破上軌後回落（反轉事件）':flags(close.gt(bblo)&close.shift().le(bblo.shift())&valid('布林下'),close.lt(bbhi)&close.shift().ge(bbhi.shift())&valid('布林上')),
+      'RSI｜上／下穿 50 中線（事件）':_cross(rsi,pd.Series(50.,index=close.index)),
+      'RSI｜重返30上方／跌回70下方（事件）':flags(rsi.gt(30)&rsi.shift().le(30),rsi.lt(70)&rsi.shift().ge(70)),
+      '斐波那契｜61.8% 回調位反穿（客製事件）':flags((trend==1)&(trend.shift()==1)&close.gt(fib)&close.shift().le(fib.shift()),(trend==-1)&(trend.shift()==-1)&close.lt(fib)&close.shift().ge(fib.shift())),
+      '一目｜雲頂突破／雲底跌破（事件）':flags(cloud_ok&cloud_ok.shift(fill_value=False)&close.gt(top)&close.shift().le(top.shift()),cloud_ok&cloud_ok.shift(fill_value=False)&close.lt(bottom)&close.shift().ge(bottom.shift())),
+      '一目｜價在雲上／下（狀態）':_state_flags(close>top,close<bottom,cloud_ok),
+      '標準差｜Z 上穿-σ／下穿+σ（反轉事件）':flags(z.gt(-zlimit)&z.shift().le(-zlimit),z.lt(zlimit)&z.shift().ge(zlimit)),
+      'ADX｜DI 交叉且 ADX≥25（事件）':di_cross.where(adx_ok,0).astype(int),
+      'ADX｜強趨勢中的 DI 多／空（狀態）':_state_flags(values['+DI']>values['-DI'],values['+DI']<values['-DI'],valid('+DI','-DI','ADX')&adx_ok),
     }
+    return out
 
 
 def validate_params(p: Mapping[str, int | float]):

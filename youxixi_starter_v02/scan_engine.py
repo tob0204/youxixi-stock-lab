@@ -63,10 +63,10 @@ def scan_batch(codes:list[str], names:dict, fetch_start:str, end_exclusive:str,
             p=p.loc[p.index <= pd.Timestamp(asof)]
             if not p.empty and now.weekday()<5 and now.time()>=time(14,30) and p.index[-1].date()!=now.date():
                 raise ValueError('今日收盤行情尚未更新')
-            if len(p)<450:
-                raise ValueError('不足 450 根歷史日K，無法合理前推 12 個月')
+            if len(p)<160:
+                raise ValueError(f'歷史日K僅 {len(p)} 根，低於指標暖機所需的 160 根；不是股票不存在')
             values=compute_indicators(p,params)
-            sig={k:v for k,v in make_signals(values,params).items() if k in chosen}
+            sig=make_signals(values,params)  # 完整策略規則；舊版只比對十指標名稱會篩成空字典
             ledger=build_ledger(p,sig,[1],cost_pct)
             result=predict_day(p,sig,ledger,len(p)-1,('2週','1個月','3個月','6個月','12個月'),
                                threshold,min_n,half_life,eff_n,require_recent)

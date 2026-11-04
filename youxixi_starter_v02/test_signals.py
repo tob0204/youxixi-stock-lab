@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from indicators import DEFAULTS, NAMES, compute_indicators, make_signals
-from formulas import formula_sections
+from formulas import formula_sections, signal_catalog
 from signal_engine import decide_latest, evaluate, wilson_95
 
 
@@ -25,9 +25,9 @@ class TestIndicators(unittest.TestCase):
     def test_ten_indicators_signals_and_formulas(self):
         values = compute_indicators(self.prices)
         signals = make_signals(values)
-        self.assertEqual(len(signals), 10)
+        self.assertEqual(len(signals), 20)
         self.assertEqual(len(formula_sections(DEFAULTS)), 10)
-        self.assertEqual(list(signals), NAMES)
+        self.assertEqual(list(signals), [item[0] for item in signal_catalog()])
         for signal in signals.values():
             self.assertTrue(signal.isin([-1, 0, 1]).all())
             self.assertEqual(len(signal), len(self.prices))

@@ -1,53 +1,55 @@
-# 油洗洗 v0.9｜GitHub + Streamlit Cloud
+# 油洗洗 v1.0｜GitHub + Streamlit（無本機安裝）
 
-**不用本機安裝 Python，也不用本機執行。** 上傳這一版的 `.py`、`requirements.txt` 等檔案到 GitHub，保留原本 Streamlit App 即可。
+## 功能
 
-## 這版修正了什麼？
+- 台股收盤後，只研究 **下一交易日**：假設隔天開盤可按建議限價進場、當日收盤離場（研究模型，非盤中真實成交驗證）。
+- 十類技術指標：MA、EMA、KD、MACD、布林通道、RSI、斐波那契回調、一目均衡表、標準差、ADX。
+- **20 種分開回測的訊號策略**：把「當天真正發生交叉」與「已持續一段時間的多空狀態」分開測；例如 KD 黃金交叉 ≠ K>D 的每一天。
+- 同時比較 2 週、1 個月、3 個月、6 個月與 12 個月的歷史樣本，保留逐日 walk-forward 驗證。
+- **點表格任意一列（尤其樣本數）即可在該表格下方展開全部樣本**，含訊號日、進場日、結果日、訊號收盤、隔日開盤、隔日收盤、扣成本後報酬及成功／失敗；可以下載完整 CSV，不用額外挑選指標。
+- 單股名稱與代號、最新收盤價、下一日方向／參考限價；產業選單設在左側，海選結果位於右側「產業掃描結果」頁籤；每次最多分批 40 檔，以降低公開行情限流風險。
+- 「技術指標公式與訊號規則」頁籤逐一公開全部公式、初值、參數、訊號定義及外部資料連結；「原始指標數值」可輸出所有歷史中間值。
+- 修正先前產業海選因訊號名稱與舊式十指標清單不一致而被篩空的問題。
+- 低於 160 根日 K 才視為未滿基本暖機資料；來源抓取失敗與資料太少分別顯示，**抓取失敗不等於股票不存在**。
 
-1. 針對 `forward_engine.py` 的 `TypeError`：缺乏可成交樣本時，Wilson 勝率下界為 `None`，不能拿 `None` 和浮點數比較。現有明確處理無效樣本，回傳「觀望」而不是當機。
-2. 原本的全市場掃描改為 **依產業海選**：先從官方證交所、櫃買中心「公司基本資料」取得公司所屬產業，再由使用者選一個產業。只掃該產業，不動其他產業。
-3. **每天只預測下一個交易日**；不再要求使用者選預測期限、日期、技術指標、回測期間或歷史勝率門檻。
-4. 十種技術指標和五個訓練視窗自動比較，只有具備基本正期望值與近期證據的結果才列為「買入／賣出」。缺乏足夠依據就明白顯示觀望，不捏造勝率。
-5. 保留每一個樣本的日期提示、完整明細和逐日前推回測表，讓使用者可以核對歷史證據。
-6. 選擇權模組繼續停用。
+## 直接更新現有 GitHub 與 Streamlit
 
-## 部署到**你目前已經開著**的 Streamlit App
+1. 下載本 ZIP 並解壓縮，只需用網頁操作，不需安裝任何程式。
+2. GitHub Repository 已建立好，不必再建一次。**先確認 Streamlit Settings → General → Main file path**：
+   - 若指向 `youxixi_starter_v02/app.py`，請把全部 `.py`、`requirements.txt`、`README.md` 上傳到 GitHub 的 `youxixi_starter_v02/` 資料夾（與它的 `app.py` **同層**）。
+   - 若指向 `app.py`，則把它們上傳到 GitHub **根目錄**。
+3. GitHub 點 Commit changes。Streamlit Community Cloud 通常會隨 GitHub 的相同分支自動重新部署；回到原本網址確認版本是 `v1.0`。
+4. 左側選股票，按「分析這檔股票」→ 首頁「看完整技術訊號比較、點選樣本數即可核對日期」→ **點其中一列** → 在表格下方直接看到逐筆結果。
+5. 要海選，從左側「依產業海選」選官方產業並按掃描，切換右側「產業掃描結果」看結果。
 
-你之前的錯誤截圖顯示雲端入口路徑為：
+**GitHub 網頁有時無法用 Upload files 覆蓋同名檔案**。可直接按鍵盤 `.` 打開 github.dev 網頁編輯器，依檔名覆蓋並 Commit；沒有必要裝 VS Code。
 
-```
-/mount/src/youxixi-stock-lab/youxixi_starter_v02/app.py
-```
+## 核心算法與參考來源
 
-這代表它使用 GitHub repository 裡的 **`youxixi_starter_v02/app.py`**，不一定是根目錄的 `app.py`。因此最重要的是**更新 Streamlit 真正指向的那一層資料夾**。如果你的網站現在仍使用 `youxixi_starter_v02/app.py`，請進 GitHub repository 的 `youxixi_starter_v02` 資料夾，再用 **Add file → Upload files** 上傳本 ZIP 解壓縮後的檔案（請不要只上傳 ZIP）。檔案要與該資料夾中的 `app.py` 同層。
+指標的數學式和策略的「訊號規則」不同；即使公式正確，策略規則也未必有預測能力。
 
-如果你已在 Streamlit 管理頁把 Main file path 改成根目錄 `app.py`，就要把檔案上傳到 repository **根目錄**，不要放入 `youxixi_starter_v02`。部署路徑和更新路徑要一致。
+| 類別 | 核對重點 | 參考 |
+|---|---|---|
+| MA | N 根收盤 SMA，短長交叉／排列分開 | [StockCharts MA](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/moving-averages-simple-and-exponential) |
+| EMA | **v1.0 改採首 N 根收盤 SMA 作第一筆 EMA**，之後 α=2/(N+1) | [StockCharts MA](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/moving-averages-simple-and-exponential) |
+| KD | 採臺灣市場慣用 RSV(9)，K、D 各以 50 起始的 1/3 遞迴；**不是** StockCharts SMA 平滑的 Fast/Slow KD。交叉、K>D 狀態、20/80 反轉各自獨立 | [臺灣 KD 算法](https://www.ezchart.com.tw/inds.php?IND=KD)、[StockCharts Stochastic](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/stochastic-oscillator-fast-slow-and-full)、[Fidelity](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/fast-stochastic) |
+| MACD | DIF=EMA12−EMA26，DEA=EMA9(DIF)，柱=DIF−DEA。交叉、零軸、柱正負分開 | [StockCharts MACD](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/macd-moving-average-convergence-divergence-oscillator) |
+| 布林 | MA20 ± 2×母體標準差(ddof=0)，通道突破與回落為不同策略 | [StockCharts Bollinger](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/bollinger-bands) |
+| RSI | 14 根 Wilder RMA；50 中線與 30/70 回復信號不同 | [StockCharts RSI](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/relative-strength-index-rsi) |
+| Fibonacci | 23.6/38.2/50/61.8/78.6；60 根可得高低點客製策略，不是唯一公定的買賣規則 | [StockCharts Fibonacci](https://chartschool.stockcharts.com/table-of-contents/chart-analysis/chart-annotation-tools/fibonacci-retracements) |
+| 一目 | 9/26/52；雲層向未來畫 26 根，回測今天看得見的雲需 `shift(26)` | [StockCharts Ichimoku](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-overlays/ichimoku-cloud) |
+| 標準差 | 母體標準差 ddof=0；只有 Z-score 及反轉條件才會產生方向 | [Pandas std](https://pandas.pydata.org/docs/reference/api/pandas.core.window.rolling.Rolling.std.html) |
+| ADX | Wilder RMA；ADX 只顯示強弱，+DI/−DI 給多空方向 | [StockCharts ADX](https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/average-directional-index-adx) |
 
-上傳後點 **Commit changes**。既有 Streamlit Community Cloud 通常會自動更新 App，不需再 Create app。回原本網址看標題中的 `v0.9`。
+## 研究解讀與限制
 
-- 主檔 `app.py`
-- 十指標 `indicators.py`, `formulas.py`, `signal_engine.py`
-- 前推／歷史證據 `audit_engine.py`, `forward_engine.py`, `window_engine.py`
-- 產業掃描 `scan_engine.py`, `sector_engine.py`, `stock_names.py`
-- 相依套件 `requirements.txt`
-- 測試程式 `test_*.py`
+- **狀態型訊號高度連續相關**：K>D 連續 20 天，不等於 20 個獨立金叉；此版仍把每天當成一個「隔日方向預測樣本」列出，但不能把筆數當成獨立統計檢定樣本數。
+- 五個歷史訓練窗高度重疊、20 種規則又多重比較，最漂亮的樣本內勝率可能有選模偏誤；請觀察另一個「逐日前推驗證」結果。
+- 買入／賣出為研究訊號，不是保證可賺的交易建議。賣出／看跌不表示可以放空。限價由歷史開盤跳空百分位數估算，並非預言明天開盤價。
+- 交易成本目前示例採往返 **0.45%**，不是你的券商實際成本；流動性、價格限制、成交量及滑價尚未完整建模。
+- **只有日 K，不是分鐘級當沖實際回測**；待後續加入盤中 OHLC 與交易所成交資格才適合做實單風控。選擇權未納入。
+- 無法使用來源或最新日 K 未完成時，會顯示原因而非假造價格。Streamlit Cloud 的 Yahoo 行情與臺灣官方 API 可用性，需實際部署後驗證。
 
-## 操作方式
+## 測試
 
-1. **🎯 明日買賣訊號**：左側選股票名稱或代號後，按「分析這檔股票」，自動比較十指標／五個回測期間，只預測下一交易日方向；顯示最後完整收盤價、歷史模型建議限價、樣本內勝率、使用的指標／期間。
-2. **🏭 依產業海選**：從產業選單選「半導體業」等產業，按「掃描此產業的明日候選」。每次最多掃描 100 檔；產業較大時再按一次接續未完成的股票；避免雲端公開行情服務長時間超時或限流。只列買入／賣出候選，並顯示成功／失敗和掃描進度，觀望不列。產業選單取自官方分類，未取得分類的股票不擅自加入。
-3. **🔎 逐日前推與樣本日期**：滑鼠懸停樣本數查看日期，並可展開成功／失敗紀錄及下載 CSV；需要時按「計算過去一年逐日前推回測」重新走歷史每個交易日。
-4. **📐 十種指標公式**：可以逐一核對 MA、EMA、KD、MACD、布林通道、RSI、斐波那契、一目均衡表、標準差、ADX 的公式與程式碼。
-
-## 重要限制
-
-- **目前只有日 K**：以當天收盤得到訊號，假設下一交易日開盤價符合限價後進場、當天收盤平倉，並非真正的盤中高頻回測或保證可成交的當沖策略。
-- 顯示的「樣本內歷史勝率」不是保證明天成功的機率，更不能代表可實際成交的勝率。五個訓練窗重疊，可能有選模過度擬合；逐日前推是補充驗證。
-- **本版自動風控的內部基準**：至少 8 筆符合限價的歷史樣本、成本後平均報酬為正、近期勝率高於基本線且近期有效樣本數足夠。這是研究起始基準，不是已被科學證明最好的交易規則；不對外宣稱已校準成功機率。
-- 「賣出」是預測次日價格偏弱的研究性訊號，不能直接解讀成已確認可放空。尚未驗證個股當沖資格、流動性與券源。
-- 假設往返成本 0.45% 只是示範值。Yahoo 日 K 及官方公司分類等外部 API 在 Streamlit 免費雲端可能遭限速、封鎖或延遲。讀取失敗的股票必須另列，不當作觀望。
-- 官方產業來源：上市 `https://openapi.twse.com.tw/v1/opendata/t187ap03_L`；上櫃 `https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O`。官方資料失敗時只呈現實際取得的市場，絕不假裝已完成全市場海選。
-
-## 離線測試
-
-本版已執行 33 項 Python 單元測試及語法編譯；**尚未實際在你的 Streamlit Cloud 頁面完成端到端測試**，尤其官方 API、Yahoo 歷史行情是否在雲端連通，仍需你上傳後確認。
+已在隔離環境執行 `python -m unittest discover`：共 38 項離線測試通過，包含公式初值、20 種策略、樣本日期完整性、歷史未來資料防漏與原本錯誤的空值情境。**本次尚無 Streamlit Cloud 實際操作端到端測試**。
